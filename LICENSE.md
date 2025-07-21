@@ -1,4 +1,6 @@
 Copyright (c) 2025 Ian McLerran
+Copyright (c) 2025 Ben Thomas
+Copyright (c) 2023 Luke Boswell and subsequent authors <https://github.com/lukewilliamboswell/roc-json/graphs/contributors>
 
 The Universal Permissive License (UPL), Version 1.0
 
