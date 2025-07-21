@@ -18,10 +18,11 @@ import dt.Now {
     now!: Utc.now!,
     now_to_nanos: Utc.to_nanos_since_epoch,
 }
-import Message
+import Msg
 import Router exposing [ServerState, Response]
 
 main! = |_args|
+    log!("Starting server...", Info)
     loop!(Uninitialized) |> Result.map_ok(|_| {})
 
 loop! : ServerState => Result ServerState [Exit I32 Str]
@@ -36,7 +37,7 @@ loop! = |state|
 
 handle_request! : Str, ServerState => Result ServerState _
 handle_request! = |request_str, state|
-    message_result = Message.decode(Str.to_utf8(request_str))
+    message_result = Msg.decode_str(request_str)
     when message_result is
         Ok(message) ->
             route_result = Router.route(message, state)
@@ -50,12 +51,8 @@ handle_request! = |request_str, state|
                     log!("Handler error: ${error_msg}", Error)
                     Ok(state)
 
-        Err(TooShort) ->
-            log!("Message too short", Error)
-            Ok(state)
-
-        Err(InvalidMessage) ->
-            log!("Invalid message format", Error)
+        Err(_) ->
+            log!("Failed to parse JSON-RPC message", Error)
             Ok(state)
 
 send_response! : Response => Result {} _
@@ -71,21 +68,21 @@ send_response! = |response|
             Stdout.line!(response_json)
 
         Error(error_resp) ->
+            log!("JSON-RPC error: ${error_resp.error.message}", Error)
             response_json = format_error_response(error_resp)
             Stdout.line!(response_json)
 
         ToolCall(tool_call) ->
             execute_tool!(tool_call)
 
-        Notification(msg) ->
-            log!(msg, Info)
+        Notification(_) ->
             Ok({})
 
         InitializationComplete ->
             log!("Handshake complete", Info)
             Ok({})
 
-execute_tool! : { id : Message.IdType, tool_name : Str, arguments : Dict Str Str } => Result {} _
+execute_tool! : { id : Msg.IdType, tool_name : Str, arguments : Dict Str Str } => Result {} _
 execute_tool! = |tool_call|
     tool_result =
         when tool_call.tool_name is

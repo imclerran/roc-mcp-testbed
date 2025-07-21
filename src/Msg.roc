@@ -1,4 +1,4 @@
-module [Msg, decode_str, decode_bytes, get_id_str, compare_ids]
+module [Msg, InitMsg, NotificationMsg, RequestMsg, IdType, decode_str, decode_bytes, get_method, get_id, get_id_str, compare_ids]
 
 import jv.Value as JV
 import rt.Compare
@@ -68,7 +68,7 @@ msg_request_recipe =
         jsonrpc: JV.field(JV.string, "jsonrpc"),
         id: JV.field(id_recipe, "id"),
         method: JV.field(JV.string, "method"),
-        params: JV.field(request_params_recipe, "params"),
+        params: JV.optional_field(request_params_recipe, "params", { name: "", arguments: Dict.empty({}) }),
     }
 
 msg_recipe : JV.Recipe Msg
@@ -79,6 +79,54 @@ msg_recipe = JV.one_of(
         msg_notification_recipe |> JV.map(Notification),
     ],
 )
+
+get_method : Msg -> Str
+get_method = |msg|
+    when msg is
+        Init({ method }) -> method
+        Request({ method }) -> method
+        Notification({ method }) -> method
+
+get_id : Msg -> Result IdType [NotificationHasNoId]
+get_id = |msg|
+    when msg is
+        Init({ id }) -> Ok(id)
+        Request({ id }) -> Ok(id)
+        Notification(_) -> Err(NotificationHasNoId)
+
+get_id_str : Msg -> Result Str [NotificationHasNoId]
+get_id_str = |msg|
+    when msg is
+        Init({ id }) -> Ok(id_to_str(id))
+        Request({ id }) -> Ok(id_to_str(id))
+        Notification(_) -> Err(NotificationHasNoId)
+
+id_to_str : IdType -> Str
+id_to_str = |id|
+    when id is
+        Str(id_str) -> id_str
+        Num(num) -> Num.to_str(num)
+
+compare_ids : IdType, IdType -> [LT, EQ, GT]
+compare_ids = |id1, id2|
+    when (id1, id2) is
+        (Str(str1), Str(str2)) -> Compare.str(str1, str2)
+        (Num(num1), Num(num2)) -> Num.compare(num1, num2)
+        (Str(str1), Num(num2)) ->
+            when Str.to_u64(str1) is
+                Ok(num1) -> Num.compare(num1, num2)
+                Err(InvalidNumStr) -> Compare.str(str1, Num.to_str(num2))
+
+        (Num(num1), Str(str2)) ->
+            when Str.to_u64(str2) is
+                Ok(num2) -> Num.compare(num1, num2)
+                Err(InvalidNumStr) -> Compare.str(Num.to_str(num1), str2)
+
+decode_str : Str -> Result Msg _
+decode_str = |str| JV.decode_str(str, msg_recipe)
+
+decode_bytes : List U8 -> Result Msg _
+decode_bytes = |bytes| JV.decode_bytes(bytes, msg_recipe)
 
 expect
     init_msg_json =
@@ -103,34 +151,6 @@ expect
         """
     result = JV.decode_str(notification_msg_json, msg_recipe)
     result == Ok(Notification({ jsonrpc: "2.0", method: "notifications/initialized", params: Dict.empty({}) }))
-
-get_id_str : Msg -> Result Str [NotificationHasNoId]
-get_id_str = |msg|
-    when msg is
-        Init({ id }) -> Ok(id_to_str(id))
-        Request({ id }) -> Ok(id_to_str(id))
-        Notification(_) -> Err(NotificationHasNoId)
-
-id_to_str : IdType -> Str
-id_to_str = |id|
-    when id is
-        Str(id_str) -> id_str
-        Num(num) -> Num.to_str(num)
-
-compare_ids : IdType, IdType -> [LT, EQ, GT]
-compare_ids = |id1, id2|
-    when (id1, id2) is
-        (Str(str1), Str(str2)) -> Compare.str(str1, str2)
-        (Num(num1), Num(num2)) -> Num.compare(num1, num2)
-        (Str(str1), Num(num2)) -> 
-            when Str.to_u64(str1) is
-                Ok(num1) -> Num.compare(num1, num2)
-                Err(InvalidNumStr) -> Compare.str(str1, Num.to_str(num2))
-
-        (Num(num1), Str(str2)) -> 
-            when Str.to_u64(str2) is
-                Ok(num2) -> Num.compare(num1, num2)
-                Err(InvalidNumStr) -> Compare.str(Num.to_str(num1), str2)
 
 expect
     (compare_ids(Str("a"), Str("b")) == LT)
@@ -166,9 +186,4 @@ expect
     (compare_ids(Num(97), Str("a")) == LT)
     and
     (compare_ids(Str("a"), Num(97)) == GT)
-
-decode_str : Str -> Result Msg _
-decode_str = |str| JV.decode_str(str, msg_recipe)
-
-decode_bytes : List U8 -> Result Msg _
-decode_bytes = |bytes| JV.decode_bytes(bytes, msg_recipe)
+    
