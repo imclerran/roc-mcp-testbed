@@ -42,3 +42,4 @@ __4) Call a tool__
 ```json
 {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "local_datetime", "arguments": {}}}
 ```
+

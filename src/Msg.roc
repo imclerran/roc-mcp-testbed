@@ -4,8 +4,10 @@ import jv.Value as JV
 import rt.Compare
 
 InitMsg : { id : IdType, jsonrpc : Str, method : Str, params : { capabilities : Dict Str Str, client_info : { name : Str, version : Str }, protocol_version : Str } }
-NotificationMsg : { jsonrpc : Str, method : Str, params : Dict Str Str }
+NotificationMsg : { jsonrpc : Str, method : Str } # params : Dict Str Str
 RequestMsg : { id : IdType, jsonrpc : Str, method : Str, params : { arguments : Dict Str Str, name : Str } }
+
+# TODO: Find solution for: params (and likely arguments) are likely to be problematic, since they may not always have Str values.
 
 Msg : [
     Init InitMsg,
@@ -40,10 +42,13 @@ init_params_recipe =
 
 request_params_recipe : JV.Recipe _
 request_params_recipe =
-    { JV.build_record <-
-        name: JV.field(JV.string, "name"),
-        arguments: JV.field(JV.dict(JV.string), "arguments"),
-    }
+    JV.one_of([
+        { JV.build_record <-
+            name: JV.field(JV.string, "name"),
+            arguments: JV.field(JV.dict(JV.string), "arguments"),
+        },
+        JV.dict(JV.string) |> JV.map(|_| { name: "", arguments: Dict.empty({}) }),
+    ])
 
 msg_init_recipe : JV.Recipe InitMsg
 msg_init_recipe =
@@ -59,7 +64,7 @@ msg_notification_recipe =
     { JV.build_record <-
         jsonrpc: JV.field(JV.string, "jsonrpc"),
         method: JV.field(JV.string, "method"),
-        params: JV.optional_field(JV.dict(JV.string), "params", Dict.empty({})),
+        # params: JV.optional_field(JV.dict(JV.string), "params", Dict.empty({})),
     }
 
 msg_request_recipe : JV.Recipe RequestMsg
@@ -150,7 +155,15 @@ expect
         {"jsonrpc": "2.0", "method": "notifications/initialized"}
         """
     result = JV.decode_str(notification_msg_json, msg_recipe)
-    result == Ok(Notification({ jsonrpc: "2.0", method: "notifications/initialized", params: Dict.empty({}) }))
+    result == Ok(Notification({ jsonrpc: "2.0", method: "notifications/initialized" })) #  params: Dict.empty({})
+
+expect
+    json =
+    """
+    {"method":"tools/list","params":{},"jsonrpc":"2.0","id":1}
+    """
+    result = JV.decode_str(json, msg_recipe)
+    result == Ok(Request({ jsonrpc: "2.0", id: Num(1), method: "tools/list", params: { arguments: Dict.empty({}), name: "" } }))
 
 expect
     (compare_ids(Str("a"), Str("b")) == LT)

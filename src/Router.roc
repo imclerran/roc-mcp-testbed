@@ -1,6 +1,7 @@
 module [Response, ServerState, route]
 
 import Msg exposing [Msg, InitMsg, NotificationMsg, RequestMsg]
+import Tool exposing [Tool]
 
 Response : [
     Initialization {
@@ -19,14 +20,7 @@ Response : [
     ToolsList {
             id : Msg.IdType,
             result : {
-                tools : List {
-                    name : Str,
-                    description : Str,
-                    inputSchema : {
-                        type : Str,
-                        properties : {},
-                    },
-                },
+                tools : List Tool,
             },
         },
     ToolCall {
@@ -40,24 +34,25 @@ Response : [
 ]
 
 ServerState : [
-    Uninitialized,
+    Uninitialized { tools : List Tool },
     Initializing {
             protocol_version : Str,
             client_info : { name : Str, version : Str },
             client_capabilities : [None],
+            tools : List Tool,
         },
     Initialized {
             protocol_version : Str,
             client_info : { name : Str, version : Str },
             client_capabilities : [None],
-            tools : List Str,
+            tools : List Tool,
         },
 ]
 
 route : Msg, ServerState -> Result (Response, ServerState) [HandlerError Str]
 route = |message, state|
     when (message, state) is
-        (Init(init_msg), Uninitialized) ->
+        (Init(init_msg), Uninitialized(_uninitialized_state)) ->
             handle_initialize(init_msg, state)
 
         (Init(init_msg), Initializing(_)) ->
@@ -109,12 +104,13 @@ route = |message, state|
             Ok((Notification(notif_msg), state))
 
 handle_initialize : InitMsg, ServerState -> Result (Response, ServerState) [HandlerError Str]
-handle_initialize = |init_msg, _state|
+handle_initialize = |init_msg, state|
     new_state = Initializing(
         {
             protocol_version: init_msg.params.protocol_version,
             client_info: init_msg.params.client_info,
             client_capabilities: None,
+            tools: get_tools(state),
         },
     )
     response = Initialization {
@@ -127,7 +123,7 @@ handle_initialize = |init_msg, _state|
                 resources: { subscribe: Bool.false, listChanged: Bool.false },
                 tools: { listChanged: Bool.false },
             },
-            serverInfo: { name: "current_time", version: "0.1.0" },
+            serverInfo: { name: "date_and_time", version: "0.1.0" },
         },
     }
     Ok((response, new_state))
@@ -141,36 +137,26 @@ handle_initialized_notification = |notif_msg, state|
                     protocol_version: st.protocol_version,
                     client_info: st.client_info,
                     client_capabilities: st.client_capabilities,
-                    tools: [],
+                    tools: st.tools,
                 },
             )
             Ok((InitializationComplete, new_state))
 
         _ -> Ok((Notification(notif_msg), state))
 
+get_tools : ServerState -> List Tool
+get_tools = |state|
+    when state is
+        Uninitialized(st) -> st.tools
+        Initializing(st) -> st.tools
+        Initialized(st) -> st.tools
+
 handle_tools_list : RequestMsg, ServerState -> Result (Response, ServerState) [HandlerError Str]
 handle_tools_list = |req_msg, state|
     response = ToolsList {
         id: req_msg.id,
         result: {
-            tools: [
-                {
-                    name: "zulu_datetime",
-                    description: "Get the current zulu datetime in ISO 8601 format",
-                    inputSchema: {
-                        type: "object",
-                        properties: {},
-                    },
-                },
-                {
-                    name: "local_datetime",
-                    description: "Get the current local datetime in ISO 8601 format",
-                    inputSchema: {
-                        type: "object",
-                        properties: {},
-                    },
-                },
-            ],
+            tools: get_tools(state),
         },
     }
     Ok((response, state))

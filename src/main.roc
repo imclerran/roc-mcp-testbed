@@ -22,10 +22,12 @@ import dt.Now {
 }
 import Msg
 import Router exposing [ServerState, Response]
+import Tool
 
 main! = |_args|
     log!("Starting server...", Info)
-    loop!(Uninitialized) |> Result.map_ok(|_| {})
+    tools = define_tools({})
+    loop!(Uninitialized({ tools: tools })) |> Result.map_ok(|_| {})
 
 loop! : ServerState => Result ServerState [Exit I32 Str]
 loop! = |state|
@@ -40,6 +42,7 @@ loop! = |state|
 handle_request! : Str, ServerState => Result ServerState _
 handle_request! = |request_str, state|
     message_result = Msg.decode_str(request_str)
+    log!("Received request: ${request_str}", Info)
     when message_result is
         Ok(message) ->
             route_result = Router.route(message, state)
@@ -54,7 +57,7 @@ handle_request! = |request_str, state|
                     Ok(state)
 
         Err(_) ->
-            log!("Failed to parse JSON-RPC message", Error)
+            log!("Failed to parse JSON-RPC message: ${request_str}", Error)
             Ok(state)
 
 send_response! : Response => Result {} _
@@ -202,3 +205,10 @@ colorize = |msg, type|
         Error -> ANSI.color(msg, { fg: Standard Red })
 
 bool_to_str = |bool| if bool then "true" else "false"
+
+define_tools : {} -> List Tool.Tool
+define_tools = |{}|
+    [
+        Tool.create_simple_tool("zulu_datetime", "Get the current zulu datetime in ISO 8601 format"),
+        Tool.create_simple_tool("local_datetime", "Get the current local datetime in ISO 8601 format"),
+    ]
