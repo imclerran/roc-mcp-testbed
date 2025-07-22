@@ -186,4 +186,3 @@ expect
     (compare_ids(Num(97), Str("a")) == LT)
     and
     (compare_ids(Str("a"), Num(97)) == GT)
-    

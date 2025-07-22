@@ -1,6 +1,6 @@
 module [Response, ServerState, route]
 
-import Msg exposing [Msg, get_method, get_id]
+import Msg exposing [Msg, InitMsg, NotificationMsg, RequestMsg]
 
 Response : [
     Initialization {
@@ -35,7 +35,7 @@ Response : [
             arguments : Dict Str Str,
         },
     Error { id : Msg.IdType, error : { code : I32, message : Str } },
-    Notification Str,
+    Notification NotificationMsg,
     InitializationComplete,
 ]
 
@@ -56,132 +56,86 @@ ServerState : [
 
 route : Msg, ServerState -> Result (Response, ServerState) [HandlerError Str]
 route = |message, state|
-    method = get_method(message)
-    method_parts = method |> Str.split_on("/")
+    when (message, state) is
+        (Init(init_msg), Uninitialized) ->
+            handle_initialize(init_msg, state)
 
-    when (method_parts, state) is
-        (["initialize"], Uninitialized) ->
-            handle_initialize(message, state)
-
-        (["initialize"], Initializing(_)) ->
-            id_result = get_id(message)
-            when id_result is
-                Ok(id) ->
-                    Ok(
-                        (
-                            Error {
-                                id: id,
-                                error: { code: -32600, message: "Server initialization already in progress" },
-                            },
-                            state,
-                        ),
-                    )
-
-                Err(_) ->
-                    Err(HandlerError("Server initialization already in progress"))
-
-        (["initialize"], Initialized(_)) ->
-            id_result = get_id(message)
-            when id_result is
-                Ok(id) ->
-                    Ok(
-                        (
-                            Error {
-                                id: id,
-                                error: { code: -32600, message: "Server is already initialized" },
-                            },
-                            state,
-                        ),
-                    )
-
-                Err(_) ->
-                    Err(HandlerError("Server is already initialized"))
-
-        (["notifications", "initialized"], Initializing(_)) ->
-            handle_initialized_notification(message, state)
-
-        (["notifications", str], Initialized(_)) ->
-            Ok(
-                (
-                    Notification(str),
-                    state,
-                )
-            )
-
-        (["tools", "list"], Initialized(_)) ->
-            handle_tools_list(message, state)
-
-        (["tools", "call"], Initialized(_)) ->
-            handle_tools_call(message, state)
-
-        (_, _) ->
-            id_result = get_id(message)
-            when id_result is
-                Ok(id) ->
-                    Ok(
-                        (
-                            Error {
-                                id: id,
-                                error: { code: -32601, message: "Method not found: ${method}" },
-                            },
-                            state,
-                        ),
-                    )
-
-                Err(_) ->
-                    Ok(
-                        (
-                            Notification(method),
-                            state,
-                        )
-                    )
-
-handle_initialize : Msg, ServerState -> Result (Response, ServerState) [HandlerError Str]
-handle_initialize = |message, _state|
-    when message is
-        Init(req) ->
-            new_state = Initializing(
-                {
-                    protocol_version: req.params.protocol_version,
-                    client_info: req.params.client_info,
-                    client_capabilities: None,
-                },
-            )
-
-            response = Initialization {
-                id: req.id,
-                result: {
-                    protocolVersion: req.params.protocol_version,
-                    capabilities: {
-                        experimental: {},
-                        prompts: { listChanged: Bool.false },
-                        resources: { subscribe: Bool.false, listChanged: Bool.false },
-                        tools: { listChanged: Bool.false },
-                    },
-                    serverInfo: { name: "current_time", version: "1.10.1" },
-                },
-            }
-
-            Ok((response, new_state))
-
-        Request(req) ->
+        (Init(init_msg), Initializing(_)) ->
             Ok(
                 (
                     Error {
-                        id: req.id,
-                        error: { code: -32600, message: "Expected initialize method for handshake" },
+                        id: init_msg.id,
+                        error: { code: -32600, message: "Server initialization already in progress" },
                     },
-                    Uninitialized,
+                    state,
                 ),
             )
 
-        _ ->
-            Err(HandlerError("Expected initialize method for handshake"))
+        (Init(init_msg), Initialized(_)) ->
+            Ok(
+                (
+                    Error {
+                        id: init_msg.id,
+                        error: { code: -32600, message: "Server is already initialized" },
+                    },
+                    state,
+                ),
+            )
 
-handle_initialized_notification : Msg, ServerState -> Result (Response, ServerState) [HandlerError Str]
-handle_initialized_notification = |message, state|
-    when (message, state) is
-        (Notification(notif), Initializing(st)) if notif.method == "notifications/initialized" ->
+        (Notification(notif_msg), Initializing(_)) if notif_msg.method == "notifications/initialized" ->
+            handle_initialized_notification(notif_msg, state)
+
+        (Notification(notif_msg), Initialized(_)) ->
+            Ok((Notification(notif_msg), state))
+
+        (Request(req_msg), Initialized(_)) if req_msg.method == "tools/list" ->
+            handle_tools_list(req_msg, state)
+
+        (Request(req_msg), Initialized(_)) if req_msg.method == "tools/call" ->
+            handle_tools_call(req_msg, state)
+
+        (Request(req_msg), _) ->
+            Ok(
+                (
+                    Error {
+                        id: req_msg.id,
+                        error: { code: -32601, message: "Method not found: ${req_msg.method}" },
+                    },
+                    state,
+                ),
+            )
+
+        (Notification(notif_msg), _) ->
+            Ok((Notification(notif_msg), state))
+
+handle_initialize : InitMsg, ServerState -> Result (Response, ServerState) [HandlerError Str]
+handle_initialize = |init_msg, _state|
+    new_state = Initializing(
+        {
+            protocol_version: init_msg.params.protocol_version,
+            client_info: init_msg.params.client_info,
+            client_capabilities: None,
+        },
+    )
+    response = Initialization {
+        id: init_msg.id,
+        result: {
+            protocolVersion: init_msg.params.protocol_version,
+            capabilities: {
+                experimental: {},
+                prompts: { listChanged: Bool.false },
+                resources: { subscribe: Bool.false, listChanged: Bool.false },
+                tools: { listChanged: Bool.false },
+            },
+            serverInfo: { name: "current_time", version: "0.1.0" },
+        },
+    }
+    Ok((response, new_state))
+
+handle_initialized_notification : NotificationMsg, ServerState -> Result (Response, ServerState) [HandlerError Str]
+handle_initialized_notification = |notif_msg, state|
+    when state is
+        Initializing(st) ->
             new_state = Initialized(
                 {
                     protocol_version: st.protocol_version,
@@ -190,85 +144,58 @@ handle_initialized_notification = |message, state|
                     tools: [],
                 },
             )
-
             Ok((InitializationComplete, new_state))
 
-        _ ->
-            Err(HandlerError("Expected notifications/initialized to complete handshake"))
+        _ -> Ok((Notification(notif_msg), state))
 
-handle_tools_list : Msg, ServerState -> Result (Response, ServerState) [HandlerError Str]
-handle_tools_list = |message, state|
-    when (message, state) is
-        (Request(req), Initialized(_st)) ->
-            response = ToolsList {
-                id: req.id,
-                result: {
-                    tools: [
-                        {
-                            name: "current_datetime",
-                            description: "Get the current datetime in ISO 8601 format",
-                            inputSchema: {
-                                type: "object",
-                                properties: {},
-                            },
-                        },
-                    ],
+handle_tools_list : RequestMsg, ServerState -> Result (Response, ServerState) [HandlerError Str]
+handle_tools_list = |req_msg, state|
+    response = ToolsList {
+        id: req_msg.id,
+        result: {
+            tools: [
+                {
+                    name: "zulu_datetime",
+                    description: "Get the current zulu datetime in ISO 8601 format",
+                    inputSchema: {
+                        type: "object",
+                        properties: {},
+                    },
                 },
-            }
-
-            Ok((response, state))
-
-        (Request(req), _) ->
-            Ok(
-                (
-                    Error {
-                        id: req.id,
-                        error: { code: -32600, message: "tools/list can only be called after server initialization" },
+                {
+                    name: "local_datetime",
+                    description: "Get the current local datetime in ISO 8601 format",
+                    inputSchema: {
+                        type: "object",
+                        properties: {},
                     },
-                    state,
-                ),
-            )
+                },
+            ],
+        },
+    }
+    Ok((response, state))
 
-        _ ->
-            Err(HandlerError("tools/list can only be called after server initialization"))
-
-handle_tools_call : Msg, ServerState -> Result (Response, ServerState) [HandlerError Str]
-handle_tools_call = |message, state|
-    when (message, state) is
-        (Request(req), Initialized(_st)) ->
-            tool_name = req.params.name
-            if Str.is_empty(tool_name) then
-                Ok(
-                    (
-                        Error {
-                            id: req.id,
-                            error: { code: -32602, message: "Missing required parameter: name" },
-                        },
-                        state,
-                    ),
-                )
-            else
-                Ok(
-                    (
-                        ToolCall {
-                            id: req.id,
-                            tool_name: tool_name,
-                            arguments: req.params.arguments,
-                        },
-                        state,
-                    ),
-                )
-
-        (Request(req), _) ->
-            Ok(
-                (
-                    Error {
-                        id: req.id,
-                        error: { code: -32600, message: "tools/call can only be called after server initialization" },
-                    },
-                    state,
-                ),
-            )
-
-        _ ->
-            Err(HandlerError("tools/call can only be called after server initialization"))
+handle_tools_call : RequestMsg, ServerState -> Result (Response, ServerState) [HandlerError Str]
+handle_tools_call = |req_msg, state|
+    tool_name = req_msg.params.name
+    if Str.is_empty(tool_name) then
+        Ok(
+            (
+                Error {
+                    id: req_msg.id,
+                    error: { code: -32602, message: "Missing required parameter: name" },
+                },
+                state,
+            ),
+        )
+    else
+        Ok(
+            (
+                ToolCall {
+                    id: req_msg.id,
+                    tool_name: tool_name,
+                    arguments: req_msg.params.arguments,
+                },
+                state,
+            ),
+        )

@@ -7,13 +7,15 @@ app [main!] {
     jv: "https://github.com/Enkidatron/roc-json-value/releases/download/0.0.2/VXTTp0a_zFOaCYmWN480h81mUTvQ40zRDuSSqn_WS9A.tar.br",
 }
 
-import cli.Stdout
-import cli.Stdin
-import cli.Stderr
-import cli.Utc
 import ansi.ANSI
-import dt.Time
+import cli.Cmd
+import cli.Stderr
+import cli.Stdin
+import cli.Stdout
+import cli.Utc
 import dt.DateTime
+import dt.Duration
+import dt.Time
 import dt.Now {
     now!: Utc.now!,
     now_to_nanos: Utc.to_nanos_since_epoch,
@@ -63,31 +65,34 @@ send_response! = |response|
             response_json = format_init_response(init_resp)
             Stdout.line!(response_json)
 
+        InitializationComplete ->
+            log!("Handshake complete", Info)
+            Ok({})
+
         ToolsList(tools_resp) ->
             response_json = format_tools_response(tools_resp)
             Stdout.line!(response_json)
+
+        ToolCall(tool_call) ->
+            execute_tool!(tool_call)
 
         Error(error_resp) ->
             log!("JSON-RPC error: ${error_resp.error.message}", Error)
             response_json = format_error_response(error_resp)
             Stdout.line!(response_json)
 
-        ToolCall(tool_call) ->
-            execute_tool!(tool_call)
-
         Notification(_) ->
-            Ok({})
-
-        InitializationComplete ->
-            log!("Handshake complete", Info)
             Ok({})
 
 execute_tool! : { id : Msg.IdType, tool_name : Str, arguments : Dict Str Str } => Result {} _
 execute_tool! = |tool_call|
     tool_result =
         when tool_call.tool_name is
-            "current_datetime" ->
-                current_datetime_tool!(tool_call.arguments)
+            "zulu_datetime" ->
+                zulu_datetime_tool!(tool_call.arguments)
+
+            "local_datetime" ->
+                local_datetime_tool!(tool_call.arguments)
 
             _ ->
                 Err("Unknown tool: ${tool_call.tool_name}")
@@ -106,12 +111,41 @@ execute_tool! = |tool_call|
             )
             Stdout.line!(error_response_json)
 
-current_datetime_tool! : Dict Str Str => Result Str _
-current_datetime_tool! = |_arguments|
+zulu_datetime_tool! : Dict Str Str => Result Str _
+zulu_datetime_tool! = |_|
     Now.date_time!({})
     |> DateTime.to_iso_str
     |> Str.concat("Z")
     |> Ok
+
+local_datetime_tool! : Dict Str Str => Result Str _
+local_datetime_tool! = |_|
+    now = Now.date_time!({})
+    offset =
+        get_offset!({})
+        |> Result.map_err(|_| "Failed to get timezone offset")?
+    DateTime.add(now, offset)
+    |> DateTime.to_iso_str
+    |> Ok
+
+get_offset! : {} => Result Duration.Duration [InvalidOffset]
+get_offset! = |{}|
+    Cmd.new("date") |> Cmd.arg("+%z") |> Cmd.output! |> .stdout |> offset_to_duration
+
+offset_to_duration : List U8 -> Result Duration.Duration [InvalidOffset]
+offset_to_duration = |bytes|
+    when bytes is
+        ['+', b1, b2, b3, b4, ..] ->
+            hours = [b1, b2] |> Str.from_utf8_lossy |> Str.to_i64 |> Result.map_err(|_| InvalidOffset)?
+            minutes = [b3, b4] |> Str.from_utf8_lossy |> Str.to_i64 |> Result.map_err(|_| InvalidOffset)?
+            Ok(Duration.from_hms(hours, minutes, 0))
+
+        ['-', b1, b2, b3, b4, ..] ->
+            hours = [b1, b2] |> Str.from_utf8_lossy |> Str.to_i64 |> Result.map_err(|_| InvalidOffset)? |> Num.mul(-1)
+            minutes = [b3, b4] |> Str.from_utf8_lossy |> Str.to_i64 |> Result.map_err(|_| InvalidOffset)? |> Num.mul(-1)
+            Ok(Duration.from_hms(hours, minutes, 0))
+
+        _ -> Err(InvalidOffset)
 
 format_init_response = |init_resp|
     id_str = format_id(init_resp.id)

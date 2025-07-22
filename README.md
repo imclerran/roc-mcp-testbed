@@ -40,5 +40,5 @@ __3) Get the tool list__
 
 __4) Call a tool__
 ```json
-{"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "current_datetime", "arguments": {}}}
+{"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "local_datetime", "arguments": {}}}
 ```
